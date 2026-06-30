@@ -1,0 +1,36 @@
+{
+  "_comment": "Config for the agent-guided variant. Copy to config.json and fill in. Secrets stay in environment variables (referenced by name), never in this file. Bucket percentages are for DISPLAY in the prompt only — the Sequence allocation rule does the real split + rounding. Amounts are integer cents. A preset may list MULTIPLE ruleIds; the runner fires each, dry-runs each, and reports per-rule failures.",
+
+  "sequence": {
+    "baseUrl": "https://api.getsequence.io/platform/v1",
+    "apiKeyEnv": "SEQUENCE_API_KEY"
+  },
+
+  "incomeAccountId": "REPLACE_WITH_INCOME_ACCOUNT_ID",
+
+  "chat": {
+    "surface": "slack",
+    "_surfaceNote": "'slack' or 'whatsapp'. For Slack set SLACK_BOT_TOKEN; for WhatsApp set the Twilio env vars and a target number.",
+    "slack": { "botTokenEnv": "SLACK_BOT_TOKEN", "channelId": "C0XXXXXXXXX", "userId": "U0OWNERXXXX" }
+  },
+
+  "pollMinutes": 60,
+  "lookbackHours": 25,
+  "resurfaceMinutes": 180,
+
+  "presets": {
+    "Balanced (50/30/20)": {
+      "ruleIds": ["REPLACE_WITH_RULE_ID"],
+      "buckets": { "Owner's Pay": 50, "Tax": 30, "Profit": 20 }
+    },
+    "Lean (60/20/20)": {
+      "ruleIds": ["REPLACE_WITH_RULE_ID"],
+      "buckets": { "Owner's Pay": 60, "Tax": 20, "Profit": 20 }
+    }
+  },
+
+  "state": {
+    "_comment": "Operational run-state — keep it LOCAL, do not depend on a SaaS store. Tracks each deposit's status (pending / allocated) for dedupe + re-surfacing.",
+    "file": "./state.json"
+  }
+}

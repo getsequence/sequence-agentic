@@ -1,0 +1,745 @@
+{
+  "name": "Profit First — Income Allocation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "node-001",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// EDIT YOUR CONFIG HERE — single source of truth.\n// Secrets (Sequence key, Slack token) live in n8n credentials.\n// Bucket %s below are for DISPLAY only; the Sequence rule does\n// the real split + rounding. All amounts are integer cents.\n// ============================================================\nconst config = {\n  sequence: { baseUrl: \"https://api.getsequence.io/platform/v1\" },\n  incomeAccountId: \"REPLACE_WITH_INCOME_ACCOUNT_ID\",\n  slack: { channelId: \"C0XXXXXXXXX\", userId: \"U0OWNERXXXX\" },\n  lookbackHours: 25,\n  resurfaceMinutes: 180,\n  presets: {\n    \"Balanced (50/30/20)\": { ruleId: \"REPLACE_WITH_RULE_ID\", buckets: { \"Owner's Pay\": 50, \"Tax\": 30, \"Profit\": 20 } },\n    \"Lean (60/20/20)\": { ruleId: \"REPLACE_WITH_RULE_ID\", buckets: { \"Owner's Pay\": 60, \"Tax\": 20, \"Profit\": 20 } },\n  },\n};\n\nconst from = new Date(Date.now() - config.lookbackHours * 3600 * 1000).toISOString();\nreturn [{ json: { config, from } }];"
+      },
+      "id": "node-002",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.config.sequence.baseUrl }}/accounts/{{ $json.config.incomeAccountId }}/transfers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "accountRole",
+              "value": "destination"
+            },
+            {
+              "name": "direction",
+              "value": "MONEY_IN"
+            },
+            {
+              "name": "status",
+              "value": "COMPLETE"
+            },
+            {
+              "name": "from",
+              "value": "={{ $json.from }}"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-003",
+      "name": "List New Income",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        460
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Load Config').first().json.config;\nconst data = $getWorkflowStaticData('global');\nif (!data.seen) data.seen = {};\nconst resp = $input.first().json;\nconst items = (resp.data && resp.data.items) ? resp.data.items : [];\nconst now = Date.now();\n\n// 1) newest deposit we have never seen\nlet pick = null;\nfor (const t of items) { if (!data.seen[t.id]) { pick = t; break; } }\n\n// 2) otherwise the oldest pending deposit past its re-surface interval\nif (!pick) {\n  const pend = Object.entries(data.seen).filter(([id, s]) => s.status === 'pending');\n  pend.sort((a, b) => (a[1].promptedAt || 0) - (b[1].promptedAt || 0));\n  for (const [id, s] of pend) {\n    if (now - (s.promptedAt || 0) >= cfg.resurfaceMinutes * 60000) {\n      pick = { id, amountInCents: s.amountInCents, source: { name: s.vendor } };\n      break;\n    }\n  }\n}\nif (!pick) return [];  // nothing to do this tick\n\nconst vendor = (pick.source && pick.source.name) || \"Unknown\";\nconst amount = pick.amountInCents;\ndata.seen[pick.id] = { status: 'pending', amountInCents: amount, vendor, promptedAt: now };\n\n// per-bucket dollar breakdown for each preset (display only)\nconst lines = Object.entries(cfg.presets).map(([name, p]) => {\n  const parts = Object.entries(p.buckets).map(([b, pct]) => `${b} ${pct}% = $${((amount * pct) / 10000).toFixed(2)}`);\n  return `*${name}*\\n   ${parts.join(\" · \")}`;\n}).join(\"\\n\");\n\nreturn [{ json: {\n  depositId: pick.id, amountInCents: amount, vendor,\n  amountDisplay: (amount / 100).toFixed(2),\n  breakdown: lines, presetOptions: Object.keys(cfg.presets),\n} }];"
+      },
+      "id": "node-004",
+      "name": "Pick Deposit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendAndWait",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Load Config').first().json.config.slack.channelId }}"
+        },
+        "message": "=💰 *You received ${{ $json.amountDisplay }} from {{ $json.vendor }}*\nHow should we allocate it?\n\n{{ $json.breakdown }}\n\nPick a preset below — or *Skip for now* to decide later. Nothing moves until you choose.",
+        "responseType": "customForm",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Allocation",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Balanced (50/30/20)"
+                  },
+                  {
+                    "option": "Lean (60/20/20)"
+                  },
+                  {
+                    "option": "Skip for now"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": 3,
+              "resumeUnit": "hours"
+            }
+          }
+        }
+      },
+      "id": "node-005",
+      "name": "Ask Allocation",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        460
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Load Config').first().json.config;\nconst data = $getWorkflowStaticData('global');\nconst pick = $('Pick Deposit').first().json;\nconst submitted = $input.first().json.data || {};\nconst choice = submitted.Allocation || submitted.allocation || Object.values(submitted)[0];\nconst isSkip = !choice || /skip/i.test(String(choice));\nlet ruleId = null;\nif (!isSkip && cfg.presets[choice]) ruleId = cfg.presets[choice].ruleId;\nconst skip = isSkip || !ruleId;\nif (skip) {\n  data.seen[pick.depositId] = { ...(data.seen[pick.depositId] || {}), status: 'pending', promptedAt: Date.now() };\n}\nreturn [{ json: { ...pick, choice: skip ? null : choice, ruleId, isSkip: skip } }];"
+      },
+      "id": "node-006",
+      "name": "Resolve Choice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-skip",
+              "leftValue": "={{ $json.isSkip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-007",
+      "name": "Chosen?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2040,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Load Config').first().json.config.slack.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=👍 Kept ${{ $json.amountDisplay }} from {{ $json.vendor }} *pending*. I’ll re-surface it on the next run."
+      },
+      "id": "node-008",
+      "name": "Reply: Kept Pending",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2340,
+        260
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load Config').first().json.config.sequence.baseUrl }}/rules/{{ $json.ruleId }}/trigger",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "=dry-{{ $json.depositId }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ simulation: true, executeAmount: $json.amountInCents }) }}",
+        "options": {}
+      },
+      "id": "node-009",
+      "name": "Dry Run (Simulation)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        660
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 4,
+        "unit": "seconds"
+      },
+      "id": "node-010",
+      "name": "Wait for Sim",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        660
+      ],
+      "webhookId": "pf-wait-sim"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Load Config').first().json.config.sequence.baseUrl }}/rules/{{ $('Resolve Choice').first().json.ruleId }}/executions/{{ $('Dry Run (Simulation)').first().json.data.executionId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "node-011",
+      "name": "Poll Sim Execution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2940,
+        660
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-sim",
+              "leftValue": "={{ $json.data.status === 'EXECUTED' && $json.data.conditionsNotMet === false && $json.data.transfersFailed === 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-012",
+      "name": "Dry Run Clean?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3240,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Load Config').first().json.config.slack.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=⚠️ Dry run did not pass for {{ $('Resolve Choice').first().json.choice }} — kept *pending*, no money moved. Status: {{ $json.data.status }}{{ $json.data.errorMessage ? ' — ' + $json.data.errorMessage : '' }}"
+      },
+      "id": "node-013",
+      "name": "Reply: Dry Run Failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        3540,
+        460
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Load Config').first().json.config.sequence.baseUrl }}/rules/{{ $('Resolve Choice').first().json.ruleId }}/trigger",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "=live-{{ $('Resolve Choice').first().json.depositId }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ executeAmount: $('Resolve Choice').first().json.amountInCents }) }}",
+        "options": {}
+      },
+      "id": "node-014",
+      "name": "Fire Live Allocation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3540,
+        860
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 6,
+        "unit": "seconds"
+      },
+      "id": "node-015",
+      "name": "Wait for Live",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3840,
+        860
+      ],
+      "webhookId": "pf-wait-live"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Load Config').first().json.config.sequence.baseUrl }}/rules/{{ $('Resolve Choice').first().json.ruleId }}/executions/{{ $('Fire Live Allocation').first().json.data.executionId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "node-016",
+      "name": "Poll Live Execution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4140,
+        860
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $getWorkflowStaticData('global');\nconst rc = $('Resolve Choice').first().json;\nconst exec = $input.first().json.data || {};\ndata.seen[rc.depositId] = { ...(data.seen[rc.depositId] || {}), status: 'allocated', allocatedAt: Date.now(), preset: rc.choice };\nconst transferIds = exec.transferIds || [];\nreturn [{ json: { ...rc, transferIds, transfersFailed: exec.transfersFailed || 0, status: exec.status } }];"
+      },
+      "id": "node-017",
+      "name": "Finalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4440,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Load Config').first().json.config.slack.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=✅ Allocated ${{ $json.amountDisplay }} from {{ $json.vendor }} as *{{ $json.choice }}*. Transfer ID(s): {{ ($json.transferIds || []).join(', ') || 'pending — poll executions' }}{{ $json.transfersFailed > 0 ? '\\n⚠️ ' + $json.transfersFailed + ' transfer(s) in this rule failed — check the execution.' : '' }}"
+      },
+      "id": "node-018",
+      "name": "Reply: Allocated",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        4740,
+        860
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 1) Detect new income (idempotent)\nHourly, list `MONEY_IN` + `COMPLETE` transfers on the income account since the last run. **Pick Deposit** dedupes against `$getWorkflowStaticData` (per-deposit status) and picks ONE deposit per tick — the newest unseen, else the oldest *pending* past its re-surface interval. Hourly cadence drains the backlog. For high deposit volume, prefer the agent-guided variant.",
+        "height": 220,
+        "width": 1180,
+        "color": 4
+      },
+      "id": "node-019",
+      "name": "Note 19",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2) Ask & wait (human-in-the-loop)\n**Send and Wait** posts the breakdown and a dropdown (Balanced / Lean / Skip). Nothing moves without a pick. No response within the wait window → the deposit stays *pending* and is re-surfaced next run.\n\n⚠️ If you rename/add presets in **Load Config**, update this node’s dropdown options to match.",
+        "height": 220,
+        "width": 720,
+        "color": 5
+      },
+      "id": "node-020",
+      "name": "Note 20",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1380,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3) Allocate: dry-run, then fire\nThe Sequence **rule does the split math + rounding** — we only pass `executeAmount` (the deposit). Dry-run (`simulation:true`) first; fire live only if clean; distinct `Idempotency-Key`s (`dry-`/`live-`) so retries never double-allocate. Then poll for `transferIds` and confirm.",
+        "height": 220,
+        "width": 760,
+        "color": 6
+      },
+      "id": "node-021",
+      "name": "Note 21",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3180,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚙️ Setup\nSequence API key + income account + one allocation rule **per preset** (the rule splits across your pods). Slack credential + channel. Edit **Load Config**. See `setup.md`.\n\n**Persistence:** dedupe uses workflow static data — keep the workflow **saved + active** so it persists across runs.",
+        "height": 180,
+        "width": 760,
+        "color": 3
+      },
+      "id": "node-022",
+      "name": "Note 22",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "List New Income",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List New Income": {
+      "main": [
+        [
+          {
+            "node": "Pick Deposit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Deposit": {
+      "main": [
+        [
+          {
+            "node": "Ask Allocation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Allocation": {
+      "main": [
+        [
+          {
+            "node": "Resolve Choice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Choice": {
+      "main": [
+        [
+          {
+            "node": "Chosen?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chosen?": {
+      "main": [
+        [
+          {
+            "node": "Reply: Kept Pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dry Run (Simulation)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run (Simulation)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Sim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Sim": {
+      "main": [
+        [
+          {
+            "node": "Poll Sim Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Sim Execution": {
+      "main": [
+        [
+          {
+            "node": "Dry Run Clean?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run Clean?": {
+      "main": [
+        [
+          {
+            "node": "Fire Live Allocation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: Dry Run Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fire Live Allocation": {
+      "main": [
+        [
+          {
+            "node": "Wait for Live",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Live": {
+      "main": [
+        [
+          {
+            "node": "Poll Live Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Live Execution": {
+      "main": [
+        [
+          {
+            "node": "Finalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize": {
+      "main": [
+        [
+          {
+            "node": "Reply: Allocated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "versionId": "profit-first-v1",
+  "tags": []
+}

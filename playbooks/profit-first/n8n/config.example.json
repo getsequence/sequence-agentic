@@ -1,0 +1,28 @@
+{
+  "_comment": "Copy the contents into the 'Load Config' node in workflow.json (or keep it here for reference). Secrets (Sequence API key, Slack token) live in n8n credentials, NOT here. The bucket percentages below are for DISPLAY in the prompt only — the Sequence allocation rule does the real split + rounding. If you rename or add presets, also update the dropdown options in the 'Ask Allocation' node.",
+
+  "sequence": {
+    "baseUrl": "https://api.getsequence.io/platform/v1"
+  },
+
+  "incomeAccountId": "REPLACE_WITH_INCOME_ACCOUNT_ID",
+
+  "slack": {
+    "channelId": "C0XXXXXXXXX",
+    "userId": "U0OWNERXXXX"
+  },
+
+  "lookbackHours": 25,
+  "resurfaceMinutes": 180,
+
+  "presets": {
+    "Balanced (50/30/20)": {
+      "ruleId": "REPLACE_WITH_RULE_ID",
+      "buckets": { "Owner's Pay": 50, "Tax": 30, "Profit": 20 }
+    },
+    "Lean (60/20/20)": {
+      "ruleId": "REPLACE_WITH_RULE_ID",
+      "buckets": { "Owner's Pay": 60, "Tax": 20, "Profit": 20 }
+    }
+  }
+}
