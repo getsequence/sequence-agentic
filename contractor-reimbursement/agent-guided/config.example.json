@@ -1,0 +1,42 @@
+{
+  "_comment": "Config for the agent-guided variant. Copy to config.json and fill in. Secrets stay in environment variables (referenced by name), never in this file. Amounts are integer cents (USD minor units), matching the Sequence API. Your coding agent's own multimodal model reads the receipt, so there is no separate LLM key here.",
+
+  "sequence": {
+    "baseUrl": "https://api.getsequence.io/platform/v1",
+    "apiKeyEnv": "SEQUENCE_API_KEY"
+  },
+
+  "slack": {
+    "botTokenEnv": "SLACK_BOT_TOKEN",
+    "expenseChannelId": "C0XXXXXXXXX",
+    "approverUserId": "U0MANAGERXXX",
+    "approveEmoji": "white_check_mark",
+    "rejectEmoji": "x"
+  },
+
+  "approval": {
+    "reminderAfterMinutes": 60,
+    "escalateAfterMinutes": 240
+  },
+
+  "policy": {
+    "currency": "USD",
+    "categories": {
+      "meals": { "maxAmountCents": 7500 },
+      "travel": { "maxAmountCents": 100000 },
+      "software": { "maxAmountCents": 50000 },
+      "supplies": { "maxAmountCents": 25000 },
+      "lodging": { "maxAmountCents": 200000 }
+    }
+  },
+
+  "roster": {
+    "U0CONTRACTOR1": { "name": "Alex Rivera", "ruleId": "REPLACE_WITH_RULE_ID" },
+    "U0CONTRACTOR2": { "name": "Sam Chen", "ruleId": "REPLACE_WITH_RULE_ID" }
+  },
+
+  "state": {
+    "_comment": "Operational run-state — keep it LOCAL, do not depend on a SaaS store. Tracks which receipts have been processed (dedupe) and which approvals are still pending.",
+    "file": "./state.json"
+  }
+}

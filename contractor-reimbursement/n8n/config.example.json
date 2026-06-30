@@ -1,0 +1,39 @@
+{
+  "_comment": "Copy the contents of this file into the 'Load Config' node in workflow.json (or keep it here and load it however you prefer). Secrets are NOT stored here — they live in n8n credentials / environment variables; this file only references their names. All amounts are integer cents (USD minor units), matching the Sequence API.",
+
+  "sequence": {
+    "baseUrl": "https://api.getsequence.io/platform/v1"
+  },
+
+  "slack": {
+    "expenseChannelId": "C0XXXXXXXXX",
+    "approverUserId": "U0MANAGERXXX"
+  },
+
+  "llm": {
+    "provider": "openrouter",
+    "model": "anthropic/claude-sonnet-4",
+    "_modelNote": "Any vision-capable OpenRouter model works, e.g. 'openai/gpt-4o', 'google/gemini-2.5-pro'. Pick one and set OPENROUTER_API_KEY in n8n credentials."
+  },
+
+  "approval": {
+    "reminderAfterMinutes": 60,
+    "escalateAfterMinutes": 240
+  },
+
+  "policy": {
+    "currency": "USD",
+    "categories": {
+      "meals": { "maxAmountCents": 7500 },
+      "travel": { "maxAmountCents": 100000 },
+      "software": { "maxAmountCents": 50000 },
+      "supplies": { "maxAmountCents": 25000 },
+      "lodging": { "maxAmountCents": 200000 }
+    }
+  },
+
+  "roster": {
+    "U0CONTRACTOR1": { "name": "Alex Rivera", "ruleId": "REPLACE_WITH_RULE_ID" },
+    "U0CONTRACTOR2": { "name": "Sam Chen", "ruleId": "REPLACE_WITH_RULE_ID" }
+  }
+}

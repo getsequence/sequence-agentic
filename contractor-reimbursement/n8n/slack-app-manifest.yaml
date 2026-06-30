@@ -1,0 +1,51 @@
+# Slack app manifest for the Contractor Expense Reimbursement playbook.
+#
+# Create the app at https://api.slack.com/apps  ->  "Create New App"  ->
+# "From an app manifest", paste this in, then install it to your workspace.
+#
+# After install:
+#   - Copy the "Bot User OAuth Token" (starts with xoxb-) into an n8n Slack
+#     credential (used by the Slack Trigger and Slack nodes).
+#   - Replace the event Request URL below with the Production webhook URL shown
+#     on the Slack Trigger node in n8n (open the node -> "Production URL").
+#   - Invite the bot to your expenses channel:  /invite @<your-bot>
+#
+# Approve/Reject is handled by n8n's "Send and Wait for Response" Slack
+# operation, which posts link-style buttons that resolve through n8n's own
+# resume webhook. That means you do NOT need to configure Slack
+# "Interactivity & Shortcuts" for this playbook — only Event Subscriptions
+# below, so the bot is notified when a receipt is uploaded.
+
+display_information:
+  name: Expense Reimbursement Bot
+  description: Reads receipts posted to Slack, checks policy, and pays approved reimbursements via Sequence.
+  background_color: "#1a1a2e"
+
+features:
+  bot_user:
+    display_name: expense-bot
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - channels:history      # read messages in public channels the bot is in
+      - groups:history        # read messages in private channels the bot is in
+      - channels:read
+      - groups:read
+      - chat:write            # post the approval request and confirmations
+      - files:read            # download the uploaded receipt image
+      - users:read            # resolve the posting user
+
+settings:
+  event_subscriptions:
+    # Replace with the n8n Slack Trigger "Production URL".
+    request_url: https://YOUR-N8N-HOST/webhook/slack-receipt
+    bot_events:
+      - file_shared           # fires when a file (receipt) is shared in a channel
+      - message.channels      # fallback: catch the message that carried the file
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

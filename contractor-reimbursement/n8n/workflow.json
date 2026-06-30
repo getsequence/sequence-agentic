@@ -1,0 +1,1013 @@
+{
+  "name": "Contractor Expense Reimbursement via Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "trigger": [
+          "file_shared"
+        ],
+        "options": {}
+      },
+      "id": "node-001",
+      "name": "Receipt Posted (Slack Trigger)",
+      "type": "n8n-nodes-base.slackTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        440
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      },
+      "webhookId": "slack-receipt"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// EDIT YOUR CONFIG HERE — single source of truth.\n// Secrets (Sequence / Slack / OpenRouter keys) live in n8n\n// credentials, NOT in this node. All amounts are integer cents.\n// ============================================================\nconst config = {\n  sequence: { baseUrl: \"https://api.getsequence.io/platform/v1\" },\n  slack: { expenseChannelId: \"C0XXXXXXXXX\", approverUserId: \"U0MANAGERXXX\" },\n  llm: { model: \"anthropic/claude-sonnet-4\" },\n  approval: { reminderAfterMinutes: 60, escalateAfterMinutes: 240 },\n  policy: {\n    currency: \"USD\",\n    categories: {\n      meals: { maxAmountCents: 7500 },\n      travel: { maxAmountCents: 100000 },\n      software: { maxAmountCents: 50000 },\n      supplies: { maxAmountCents: 25000 },\n      lodging: { maxAmountCents: 200000 },\n    },\n  },\n  roster: {\n    \"U0CONTRACTOR1\": { name: \"Alex Rivera\", ruleId: \"REPLACE_WITH_RULE_ID\" },\n    \"U0CONTRACTOR2\": { name: \"Sam Chen\", ruleId: \"REPLACE_WITH_RULE_ID\" },\n  },\n};\n\n// Normalize the Slack trigger payload. Field names vary by event type —\n// after the first run, pin the trigger output and adjust these if needed.\nconst ev = $input.first().json;\nconst trigger = {\n  fileId: ev.file_id || (ev.event && ev.event.file_id) || ev.file || null,\n  channelId: ev.channel_id || ev.channel || (ev.event && ev.event.channel) || config.slack.expenseChannelId,\n  userId: ev.user_id || ev.user || (ev.event && ev.event.user) || null,\n  threadTs: ev.event_ts || ev.ts || (ev.event && ev.event.event_ts) || null,\n};\n\nreturn [{ json: { config, trigger } }];"
+      },
+      "id": "node-002",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://slack.com/api/files.info",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "value": "={{ $json.trigger.fileId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-003",
+      "name": "Get File Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        440
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Slack Bot Token (xoxb)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.file.url_private }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "node-004",
+      "name": "Download Receipt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        440
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Slack Bot Token (xoxb)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst bin = item.binary.data;\nconst dataUrl = `data:${bin.mimeType};base64,${bin.data}`;\nconst model = $('Load Config').first().json.config.llm.model;\nconst requestBody = {\n  model,\n  messages: [\n    { role: 'system', content: 'You are an expense-receipt parser. Respond with ONLY a compact JSON object and no prose.' },\n    { role: \"user\", content: [\n      { type: 'text', text: 'From this receipt image extract these keys: amount_cents (integer, total in cents), currency (ISO 4217 code), vendor (string), category (one of: meals, travel, software, supplies, lodging, other), date (YYYY-MM-DD). Use null for anything unreadable. Respond with ONLY the JSON object.' },\n      { type: \"image_url\", image_url: { url: dataUrl } },\n    ] },\n  ],\n};\nreturn [{ json: { requestBody } }];"
+      },
+      "id": "node-005",
+      "name": "Build Image Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
+        "options": {}
+      },
+      "id": "node-006",
+      "name": "Read Receipt (OpenRouter)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1640,
+        440
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "OpenRouter"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst msg = raw.choices && raw.choices[0] ? raw.choices[0].message : null;\nlet content = msg ? msg.content : '';\ncontent = String(content).trim();\nif (content.indexOf('```') !== -1) {\n  content = content.replace(/```json/gi, '').replace(/```/g, '').trim();\n}\nlet parsed = null;\ntry { parsed = JSON.parse(content); } catch (e) { parsed = null; }\nconst cfg = $('Load Config').first().json;\nreturn [{ json: { receipt: parsed, parseError: parsed ? null : content, config: cfg.config, trigger: cfg.trigger } }];"
+      },
+      "id": "node-007",
+      "name": "Parse Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst r = j.receipt || {};\nconst policy = j.config.policy;\nlet valid = true; let reason = null;\nif (!j.receipt || r.amount_cents == null) {\n  valid = false; reason = 'Could not read an amount from the receipt.';\n} else if (!r.category || !policy.categories[r.category]) {\n  valid = false; reason = `Category \"${r.category || 'unknown'}\" is not an allowed expense category.`;\n} else if (r.amount_cents > policy.categories[r.category].maxAmountCents) {\n  const max = (policy.categories[r.category].maxAmountCents / 100).toFixed(2);\n  const amt = (r.amount_cents / 100).toFixed(2);\n  valid = false; reason = `$${amt} exceeds the ${r.category} limit of $${max}.`;\n}\nreturn [{ json: { ...j, valid, reason } }];"
+      },
+      "id": "node-008",
+      "name": "Validate Policy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-policy",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-009",
+      "name": "Policy OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2480,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Load Config').first().json.trigger.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=:warning: Receipt not reimbursed — {{ $json.reason }}",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Load Config').first().json.trigger.threadTs }}"
+            }
+          }
+        }
+      },
+      "id": "node-010",
+      "name": "Reply: Out of Policy",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2760,
+        240
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst roster = j.config.roster || {};\nconst entry = roster[j.trigger.userId] || null;\nconst known = !!(entry && entry.ruleId && entry.ruleId !== 'REPLACE_WITH_RULE_ID');\nreturn [{ json: { ...j, contractor: entry, contractorKnown: known } }];"
+      },
+      "id": "node-011",
+      "name": "Resolve Contractor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-known",
+              "leftValue": "={{ $json.contractorKnown }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-012",
+      "name": "Contractor Known?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3040,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Load Config').first().json.trigger.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=:warning: No payout rule is configured for <@{{ $('Load Config').first().json.trigger.userId }}>. Add them to the roster in the *Load Config* node.",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Load Config').first().json.trigger.threadTs }}"
+            }
+          }
+        }
+      },
+      "id": "node-013",
+      "name": "Reply: No Payout Rule",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        3320,
+        440
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendAndWait",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Resolve Contractor').first().json.config.slack.approverUserId }}"
+        },
+        "message": "=*Reimbursement approval needed*\n• Contractor: {{ $('Resolve Contractor').first().json.contractor.name }}\n• Vendor: {{ $('Resolve Contractor').first().json.receipt.vendor }}\n• Category: {{ $('Resolve Contractor').first().json.receipt.category }}\n• Amount: ${{ ($('Resolve Contractor').first().json.receipt.amount_cents / 100).toFixed(2) }}\n• Date: {{ $('Resolve Contractor').first().json.receipt.date }}",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "buttonApprovalLabel": "Approve",
+            "buttonDisapprovalLabel": "Reject"
+          }
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": 1,
+              "resumeUnit": "days"
+            }
+          }
+        }
+      },
+      "id": "node-014",
+      "name": "Request Manager Approval",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        3320,
+        840
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approved",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-015",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3600,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Resolve Contractor').first().json.trigger.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=:x: Reimbursement was rejected by the manager. No money moved.",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Resolve Contractor').first().json.trigger.threadTs }}"
+            }
+          }
+        }
+      },
+      "id": "node-016",
+      "name": "Reply: Rejected",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        3880,
+        640
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Resolve Contractor').first().json.config.sequence.baseUrl }}/rules/{{ $('Resolve Contractor').first().json.contractor.ruleId }}/trigger",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "=dry-{{ $('Resolve Contractor').first().json.trigger.fileId }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ simulation: true, executeAmount: $('Resolve Contractor').first().json.receipt.amount_cents }) }}",
+        "options": {}
+      },
+      "id": "node-017",
+      "name": "Dry Run (Simulation)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3880,
+        1040
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "node-018",
+      "name": "Wait for Sim",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4160,
+        1040
+      ],
+      "webhookId": "wait-sim"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Resolve Contractor').first().json.config.sequence.baseUrl }}/rules/{{ $('Resolve Contractor').first().json.contractor.ruleId }}/executions/{{ $('Dry Run (Simulation)').first().json.data.executionId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "node-019",
+      "name": "Poll Sim Execution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4440,
+        1040
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-sim",
+              "leftValue": "={{ $json.data.status === 'EXECUTED' && $json.data.conditionsNotMet === false && $json.data.transfersFailed === 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-020",
+      "name": "Dry Run Clean?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4720,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Resolve Contractor').first().json.trigger.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=:warning: Dry run did not pass — not paying. Status: {{ $json.data.status }}{{ $json.data.errorMessage ? ' — ' + $json.data.errorMessage : '' }}",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Resolve Contractor').first().json.trigger.threadTs }}"
+            }
+          }
+        }
+      },
+      "id": "node-021",
+      "name": "Reply: Dry Run Failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        5000,
+        840
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Resolve Contractor').first().json.config.sequence.baseUrl }}/rules/{{ $('Resolve Contractor').first().json.contractor.ruleId }}/trigger",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "=live-{{ $('Resolve Contractor').first().json.trigger.fileId }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ executeAmount: $('Resolve Contractor').first().json.receipt.amount_cents }) }}",
+        "options": {}
+      },
+      "id": "node-022",
+      "name": "Fire Live Reimbursement",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5000,
+        1240
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "id": "node-023",
+      "name": "Wait for Live",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5280,
+        1240
+      ],
+      "webhookId": "wait-live"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Resolve Contractor').first().json.config.sequence.baseUrl }}/rules/{{ $('Resolve Contractor').first().json.contractor.ruleId }}/executions/{{ $('Fire Live Reimbursement').first().json.data.executionId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "node-024",
+      "name": "Poll Live Execution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5560,
+        1240
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE",
+          "name": "Sequence API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Resolve Contractor').first().json.trigger.channelId }}"
+        },
+        "messageType": "text",
+        "text": "=:white_check_mark: Reimbursed ${{ ($('Resolve Contractor').first().json.receipt.amount_cents / 100).toFixed(2) }} to {{ $('Resolve Contractor').first().json.contractor.name }}. Transfer ID(s): {{ ($json.data.transferIds || []).join(', ') || 'pending — poll executions for the final state' }}",
+        "otherOptions": {
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Resolve Contractor').first().json.trigger.threadTs }}"
+            }
+          }
+        }
+      },
+      "id": "node-025",
+      "name": "Reply: Reimbursed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        5840,
+        1240
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 1) Read & validate the receipt\nSlack file → download → multimodal LLM (OpenRouter, any vision model) → extract amount/vendor/category/date → check the policy in **Load Config**. Out-of-policy receipts are rejected in-thread; no manager is pinged.",
+        "height": 200,
+        "width": 1180,
+        "color": 4
+      },
+      "id": "node-026",
+      "name": "Note 26",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2) Human-in-the-loop approval\nResolve the Slack user to their payout `rule_id`, then **Send and Wait** for the manager to Approve/Reject. Nothing moves without an explicit approval. The wait is capped at 1 day (see *Request Manager Approval* → Limit Wait Time); wire your own reminder/escalation if you want nudges.",
+        "height": 220,
+        "width": 700,
+        "color": 5
+      },
+      "id": "node-027",
+      "name": "Note 27",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3) Pay safely: dry-run, then fire\nOn approve: **dry-run** the rule (`simulation: true`) and only fire live if the simulation is clean. Live fire passes `executeAmount` (the receipt total, in cents) with a fresh `Idempotency-Key`. Then poll the execution for `transferIds` and confirm in-thread.",
+        "height": 220,
+        "width": 760,
+        "color": 6
+      },
+      "id": "node-028",
+      "name": "Note 28",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3640,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚙️ Setup\nFill credentials (Slack token, OpenRouter key, Sequence API key) and edit **Load Config**. See `setup.md`.\n\n**After import:** run once, pin the *Receipt Posted* trigger output, and confirm the Slack field names in *Load Config* match (file_id / channel / user / ts).",
+        "height": 160,
+        "width": 760,
+        "color": 3
+      },
+      "id": "node-029",
+      "name": "Note 29",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Receipt Posted (Slack Trigger)": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Get File Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Info": {
+      "main": [
+        [
+          {
+            "node": "Download Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Receipt": {
+      "main": [
+        [
+          {
+            "node": "Build Image Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Image Request": {
+      "main": [
+        [
+          {
+            "node": "Read Receipt (OpenRouter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Receipt (OpenRouter)": {
+      "main": [
+        [
+          {
+            "node": "Parse Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Extraction": {
+      "main": [
+        [
+          {
+            "node": "Validate Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Policy": {
+      "main": [
+        [
+          {
+            "node": "Policy OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Policy OK?": {
+      "main": [
+        [
+          {
+            "node": "Resolve Contractor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: Out of Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Contractor": {
+      "main": [
+        [
+          {
+            "node": "Contractor Known?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contractor Known?": {
+      "main": [
+        [
+          {
+            "node": "Request Manager Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: No Payout Rule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Manager Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Dry Run (Simulation)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run (Simulation)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Sim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Sim": {
+      "main": [
+        [
+          {
+            "node": "Poll Sim Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Sim Execution": {
+      "main": [
+        [
+          {
+            "node": "Dry Run Clean?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run Clean?": {
+      "main": [
+        [
+          {
+            "node": "Fire Live Reimbursement",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: Dry Run Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fire Live Reimbursement": {
+      "main": [
+        [
+          {
+            "node": "Wait for Live",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Live": {
+      "main": [
+        [
+          {
+            "node": "Poll Live Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Live Execution": {
+      "main": [
+        [
+          {
+            "node": "Reply: Reimbursed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "versionId": "contractor-reimbursement-v1",
+  "tags": []
+}
