@@ -1,0 +1,57 @@
+{
+  "_comment": "Pattern D — Split every paycheck across buckets (Profit First: 50% Owner's Pay, 30% Tax, 20% Profit). All PERCENTAGE actions in the same step calculate from the full incoming amount simultaneously — they do NOT cascade. Adjust percentages and add/remove actions for your allocation. Replace placeholder IDs with your real account IDs.",
+  "name": "Profit First income split",
+  "trigger": {
+    "type": "ON_FUNDS_TRANSFERRED",
+    "accountId": "INCOME_SOURCE_ID"
+  },
+  "steps": [
+    {
+      "conditions": null,
+      "actions": [
+        {
+          "type": "PERCENTAGE",
+          "percentageValue": 50,
+          "percentageTarget": "INCOMING_AMOUNT",
+          "source": {
+            "id": "INCOME_SOURCE_ID",
+            "type": "INCOME_SOURCE"
+          },
+          "destination": {
+            "id": "OWNERS_PAY_POD_ID",
+            "type": "POD"
+          },
+          "groupIndex": 0
+        },
+        {
+          "type": "PERCENTAGE",
+          "percentageValue": 30,
+          "percentageTarget": "INCOMING_AMOUNT",
+          "source": {
+            "id": "INCOME_SOURCE_ID",
+            "type": "INCOME_SOURCE"
+          },
+          "destination": {
+            "id": "TAX_POD_ID",
+            "type": "POD"
+          },
+          "groupIndex": 0
+        },
+        {
+          "type": "PERCENTAGE",
+          "percentageValue": 20,
+          "percentageTarget": "INCOMING_AMOUNT",
+          "source": {
+            "id": "INCOME_SOURCE_ID",
+            "type": "INCOME_SOURCE"
+          },
+          "destination": {
+            "id": "PROFIT_POD_ID",
+            "type": "POD"
+          },
+          "groupIndex": 0
+        }
+      ]
+    }
+  ]
+}

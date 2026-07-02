@@ -1,0 +1,29 @@
+{
+  "_comment": "Pattern A — Save 20% of every paycheck. Replace INCOME_SOURCE_ID with your income account ID and SAVINGS_POD_ID with your savings pod ID. Account types: INCOME_SOURCE for income accounts, POD for savings buckets.",
+  "name": "Save 20% of every paycheck",
+  "trigger": {
+    "type": "ON_FUNDS_TRANSFERRED",
+    "accountId": "INCOME_SOURCE_ID"
+  },
+  "steps": [
+    {
+      "conditions": null,
+      "actions": [
+        {
+          "type": "PERCENTAGE",
+          "percentageValue": 20,
+          "percentageTarget": "INCOMING_AMOUNT",
+          "source": {
+            "id": "INCOME_SOURCE_ID",
+            "type": "INCOME_SOURCE"
+          },
+          "destination": {
+            "id": "SAVINGS_POD_ID",
+            "type": "POD"
+          },
+          "groupIndex": 0
+        }
+      ]
+    }
+  ]
+}

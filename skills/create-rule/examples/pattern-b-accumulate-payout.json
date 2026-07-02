@@ -1,0 +1,64 @@
+{
+  "_comment": "Pattern B — Two rules: (1) fund a Tax pod with 25% of every paycheck, (2) pay quarterly tax from that pod on a fixed date. Create BOTH rules. Replace placeholder IDs with your account IDs. Account types: INCOME_SOURCE, POD, EXTERNAL (for tax payment account).",
+  "rules": [
+    {
+      "_comment": "Rule 1: Fund the Tax pod on income",
+      "name": "Set aside 25% for taxes",
+      "trigger": {
+        "type": "ON_FUNDS_TRANSFERRED",
+        "accountId": "INCOME_SOURCE_ID"
+      },
+      "steps": [
+        {
+          "conditions": null,
+          "actions": [
+            {
+              "type": "PERCENTAGE",
+              "percentageValue": 25,
+              "percentageTarget": "INCOMING_AMOUNT",
+              "source": {
+                "id": "INCOME_SOURCE_ID",
+                "type": "INCOME_SOURCE"
+              },
+              "destination": {
+                "id": "TAX_POD_ID",
+                "type": "POD"
+              },
+              "groupIndex": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "_comment": "Rule 2: Pay quarterly tax on a specific date. Change scheduleType to MONTHLY for monthly payments.",
+      "name": "Quarterly tax payment",
+      "trigger": {
+        "type": "SCHEDULED",
+        "scheduleType": "ONE_TIME",
+        "startDate": "2025-09-15T12:00:00Z",
+        "accountId": "TAX_POD_ID"
+      },
+      "steps": [
+        {
+          "conditions": null,
+          "actions": [
+            {
+              "type": "ROUND_DOWN",
+              "amountInCents": 0,
+              "source": {
+                "id": "TAX_POD_ID",
+                "type": "POD"
+              },
+              "destination": {
+                "id": "TAX_PAYMENT_ACCOUNT_ID",
+                "type": "EXTERNAL"
+              },
+              "groupIndex": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

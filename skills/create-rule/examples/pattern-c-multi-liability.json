@@ -1,0 +1,85 @@
+{
+  "_comment": "Pattern C — Two rules: (1) fund a Liabilities pod from income, (2) pay multiple credit cards from that pod. Create BOTH rules. Replace placeholder IDs. For liability actions (LAST_STATEMENT_BALANCE, NEXT_PAYMENT_MINIMUM, TOTAL_AMOUNT_DUE), the destination must be a connected liability account.",
+  "rules": [
+    {
+      "_comment": "Rule 1: Move 30% of income into a Liabilities pod",
+      "name": "Fund liabilities pod",
+      "trigger": {
+        "type": "ON_FUNDS_TRANSFERRED",
+        "accountId": "INCOME_SOURCE_ID"
+      },
+      "steps": [
+        {
+          "conditions": null,
+          "actions": [
+            {
+              "type": "PERCENTAGE",
+              "percentageValue": 30,
+              "percentageTarget": "INCOMING_AMOUNT",
+              "source": {
+                "id": "INCOME_SOURCE_ID",
+                "type": "INCOME_SOURCE"
+              },
+              "destination": {
+                "id": "LIABILITIES_POD_ID",
+                "type": "POD"
+              },
+              "groupIndex": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "_comment": "Rule 2: When money hits the Liabilities pod, pay each credit card's last statement balance. Add or remove actions for each liability. groupIndex groups actions that share a spending cap.",
+      "name": "Pay credit cards from liabilities pod",
+      "trigger": {
+        "type": "ON_FUNDS_TRANSFERRED",
+        "accountId": "LIABILITIES_POD_ID"
+      },
+      "steps": [
+        {
+          "conditions": null,
+          "actions": [
+            {
+              "type": "LAST_STATEMENT_BALANCE",
+              "source": {
+                "id": "LIABILITIES_POD_ID",
+                "type": "POD"
+              },
+              "destination": {
+                "id": "CREDIT_CARD_1_ID",
+                "type": "EXTERNAL"
+              },
+              "groupIndex": 0
+            },
+            {
+              "type": "LAST_STATEMENT_BALANCE",
+              "source": {
+                "id": "LIABILITIES_POD_ID",
+                "type": "POD"
+              },
+              "destination": {
+                "id": "CREDIT_CARD_2_ID",
+                "type": "EXTERNAL"
+              },
+              "groupIndex": 1
+            },
+            {
+              "type": "NEXT_PAYMENT_MINIMUM",
+              "source": {
+                "id": "LIABILITIES_POD_ID",
+                "type": "POD"
+              },
+              "destination": {
+                "id": "STUDENT_LOAN_ID",
+                "type": "EXTERNAL"
+              },
+              "groupIndex": 2
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
