@@ -1,0 +1,30 @@
+{
+  "_comment": "Pattern A — Transfer $500 on the 1st of every month. Replace CHECKING_ACCOUNT_ID with your source account ID and SAVINGS_POD_ID with the destination. Set startDate to the first upcoming 1st of the month in UTC. Account types: CHECKING, SAVINGS, INCOME_SOURCE, POD.",
+  "name": "Monthly $500 to savings",
+  "trigger": {
+    "type": "SCHEDULED",
+    "scheduleType": "MONTHLY",
+    "startDate": "2025-08-01T00:00:00Z",
+    "accountId": "CHECKING_ACCOUNT_ID"
+  },
+  "steps": [
+    {
+      "conditions": null,
+      "actions": [
+        {
+          "type": "FIXED",
+          "amountInCents": 50000,
+          "source": {
+            "id": "CHECKING_ACCOUNT_ID",
+            "type": "CHECKING"
+          },
+          "destination": {
+            "id": "SAVINGS_POD_ID",
+            "type": "POD"
+          },
+          "groupIndex": 0
+        }
+      ]
+    }
+  ]
+}
