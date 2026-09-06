@@ -51,8 +51,9 @@ click **Add to Hermes**.
 hermes mcp add sequence --url https://app.getsequence.io/api/mcp --auth oauth
 ```
 
-A browser opens for sign-in. Approve all tools when prompted. Already in a chat? Run `/reload-mcp`
-to refresh your tool list.
+A browser opens for sign-in, then you pick which tools to enable. What's offered is already limited
+to what your Sequence role allows, and money movement needs your approval either way. Already in a
+chat? Run `/reload-mcp` to refresh your tool list.
 
 ### Claude Code
 

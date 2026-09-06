@@ -46,6 +46,27 @@ https://app.getsequence.io/api/mcp
 Authentication is OAuth. Sign-in happens in the browser; permissions follow the user's Sequence
 role. There is no API key for this path.
 
+**OpenClaw** — install the Sequence plugin, which brings the connection with it:
+
+```bash
+openclaw plugins install clawhub:@getsequence/sequence
+openclaw gateway restart
+```
+
+OpenClaw will show what the plugin is allowed to do and ask for approval. Read it — this plugin
+reaches the user's finances. Only in a script or CI, where no one can answer the prompt, add
+`--accept-capabilities`; do not use it for an ordinary install.
+
+That plugin ships its own guidance, so if you installed it you already have this skill's content and
+don't need this skill as well.
+
+To connect without the plugin:
+
+```bash
+openclaw mcp add sequence --url https://app.getsequence.io/api/mcp --transport streamable-http --auth oauth
+openclaw mcp login sequence
+```
+
 **Hermes** — in the Sequence app, open Connect your agent, pick Hermes, and click **Add to Hermes**.
 Or from a terminal:
 
@@ -59,29 +80,17 @@ hermes mcp add sequence --url https://app.getsequence.io/api/mcp --auth oauth
 claude mcp add --transport http sequence https://app.getsequence.io/api/mcp
 ```
 
-**OpenClaw** — install the Sequence plugin, which brings the connection with it:
-
-```bash
-openclaw plugins install clawhub:@getsequence/sequence
-openclaw gateway restart
-```
-
-Add `--accept-capabilities` to approve non-interactively. That plugin ships its own guidance, so
-if you installed it you already have this skill's content and don't need this skill as well.
-
-To connect without the plugin:
-
-```bash
-openclaw mcp add sequence --url https://app.getsequence.io/api/mcp --transport streamable-http --auth oauth
-openclaw mcp login sequence
-```
-
 **Cursor, ChatGPT, Codex, Grok, Gemini, and other MCP clients** — most need only the URL above with
 OAuth selected. Each client has its own connector form or config file; exact fields are at
 <https://app.getsequence.io/agents>.
 
-Whichever client: a browser opens for sign-in. Use the email of the user's existing Sequence account
-and approve all tools when prompted.
+Whichever client: a browser opens for sign-in. Use the email of the user's existing Sequence account.
+
+Clients then ask which of the server's tools to enable. Two things bound that choice regardless of
+what is enabled: the tool list is already filtered to what the signed-in user's Sequence role
+permits, and money movement always needs separate human approval in the Sequence app. Enabling
+everything is the simplest working setup; enable fewer for a narrower surface — read-only work needs
+only the `list*` and `get*` tools.
 
 ## Every session
 
